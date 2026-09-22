@@ -1,0 +1,52 @@
+id: community-my-mod
+displayName: My Community Mod
+category: graphics               # vr | graphics | qol | system
+status: available                # available | planned
+supportedEngines:
+  - unreal5
+configSchema:
+  - name: version
+    type: string
+    required: true
+    description: Upstream release tag.
+  - name: downloadUrl
+    type: url
+    required: true
+    description: HTTPS URL of the release archive.
+  - name: sha256
+    type: sha256
+    required: true
+    description: Expected SHA-256 of the archive.
+  - name: proxy
+    type: path
+    required: true
+    description: Absolute path of the proxy DLL the runner renames the upstream host into.
+checks:
+  - id: archive-reachable
+    label: Archive reachable
+    kind: archive-reachable
+    severity: warning
+    category: modulespecific
+    params:
+      urlField: downloadUrl
+  - id: archive-sha256
+    label: Archive SHA-256 matches recipe
+    kind: archive-sha256
+    severity: blocker
+    category: modulespecific
+    params:
+      urlField: downloadUrl
+      expectedField: sha256
+install:
+  - kind: extract-zip
+    description: Extract the upstream archive into the game executable directory.
+    params:
+      archivePathField: downloadUrl
+  - kind: move-file
+    description: Rename the upstream host DLL into the recipe-declared proxy.
+    params:
+      fromField: downloadUrl
+      toField: proxy
+safetyNotes:
+  - Always close the game before applying.
+  - Run Moddin Desktop as a regular user; do not run elevated.

@@ -1,0 +1,69 @@
+id: community-fps-unlocker
+displayName: Community FPS Unlocker
+category: graphics
+status: available
+supportedEngines:
+  - unreal5
+  - redengine
+  - re-engine
+  - unity
+configSchema:
+  - name: downloadUrl
+    type: url
+    required: true
+    description: HTTPS URL of the FPS Unlocker release archive (zip).
+  - name: sha256
+    type: sha256
+    required: true
+    description: Expected SHA-256 of the archive.
+  - name: version
+    type: string
+    required: true
+    description: Upstream FPS Unlocker release tag.
+  - name: extractedDir
+    type: path
+    required: true
+    description: Absolute path of the staging directory where the archive is extracted before files are copied into the game directory.
+checks:
+  - id: archive-reachable
+    label: FPS Unlocker archive reachable
+    kind: archive-reachable
+    severity: warning
+    category: modulespecific
+    description: Confirms the configured download URL responds before any install step runs.
+    params:
+      urlField: downloadUrl
+  - id: archive-sha256
+    label: Archive SHA-256 matches recipe
+    kind: archive-sha256
+    severity: blocker
+    category: modulespecific
+    description: Compares the downloaded archive against the declared digest.
+    params:
+      urlField: downloadUrl
+      expectedField: sha256
+install:
+  - kind: kill-process
+    description: Stop the game if it is still running before dropping files into its directory.
+    params:
+      processName: '{{gameExecutableBaseName}}'
+      force: false
+  - kind: extract-zip
+    description: Extract FPS Unlocker archive into the staging directory.
+    params:
+      archivePathField: downloadUrl
+  - kind: move-file
+    description: Promote the unlocked DXGI proxy into the game executable directory.
+    params:
+      fromField: extractedDir
+      toField: extractedDir
+uninstall:
+  - kind: file-delete
+    description: Remove the unlocked DXGI proxy dropped next to the game executable.
+    params:
+      pathField: extractedDir
+
+safetyNotes:
+  - FPS Unlocker modifies the game's rendering loop; some games' anti-cheat (EAC, BattlEye) will flag it. Use at your own risk.
+  - Always close the game AND any overlay (Steam, Discord, RivaTuner) before applying or removing.
+  - Combined with OptiScaler the unlocked FPS may make frame-generation reordering visible; lower the cap if you see stutter.

@@ -1,0 +1,66 @@
+name: Validate capabilities
+
+on:
+  pull_request:
+    paths:
+      - 'capabilities/**'
+      - 'scripts/**'
+      - '.github/workflows/validate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'capabilities/**'
+      - 'scripts/**'
+
+jobs:
+  validate:
+    name: Schema & kind check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate every capability
+        run: |
+          set -euo pipefail
+          python scripts/validate_capability.py capabilities/
+
+      - name: Validate catalog.json shape
+        run: |
+          set -euo pipefail
+          python -c "
+          import json, sys
+          catalog = json.load(open('catalog.json'))
+          assert catalog['version'] == 1
+          ids = [c['id'] for c in catalog['capabilities']]
+          assert len(ids) == len(set(ids)), f'duplicate ids in catalog: {ids}'
+          print(f'catalog.json looks valid ({len(ids)} capabilities)')
+          "
+
+      - name: Validate revoked-ids.json shape
+        run: |
+          set -euo pipefail
+          python -c "
+          import json
+          revoked = json.load(open('revoked-ids.json'))
+          assert 'revoked' in revoked
+          assert isinstance(revoked['revoked'], list)
+          print(f'revoked-ids.json: {len(revoked[\"revoked\"])} entries')
+          "
+
+      - name: Fail on accidental signing key commit
+        run: |
+          set -euo pipefail
+          if git ls-files '*.key' '*.priv' 'secrets/' | grep -q .; then
+            echo 'Forbidden signing material tracked in git. Remove before merging.' >&2
+            exit 1
+          fi
