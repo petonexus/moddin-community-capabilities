@@ -106,6 +106,29 @@ intentional friction for the highest-trust asset.
 
 Apps can pin multiple keys during a rotation window.
 
+### Current maintainer key
+
+The active maintainer signing key carries the following fingerprint:
+
+| Field | Value |
+|---|---|
+| Public key (base64, raw 32 bytes) | `Mh/WGQ0kCviGtiX/8wLB5fqBCLgtVR/4smlVai13xs8=` |
+| SHA-256 fingerprint (first 16 hex chars) | `e247ca4981f22245` |
+| Generated | 2026-09-22 |
+| Embedded in Moddin Desktop as | `BOOTSTRAP_PUBLIC_KEY_B64` in `src-tauri/src/community_catalog.rs` |
+
+To verify the catalog on disk against this key locally:
+
+```bash
+cd src-tauri
+MODDIN_BOOTSTRAP_KEY=Mh/WGQ0kCviGtiX/8wLB5fqBCLgtVR/4smlVai13xs8= \
+    cargo run --example verify_signed_catalog -- \
+    ../moddin-community-capabilities/catalog.json \
+    ../moddin-community-capabilities/catalog.json.sig
+```
+
+Expected output: `[OK] ... (1021 bytes) signed by 64 bytes signature`.
+
 ### Layer 5 — origin-aware UX
 
 The app shows different UI for capabilities of different origins:
