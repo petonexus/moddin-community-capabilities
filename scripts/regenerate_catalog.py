@@ -85,17 +85,21 @@ def maybe_sign(catalog_path: Path) -> None:
     pem_path.chmod(0o600)
 
     try:
+        # `openssl pkeyutl -sign` rejects PKCS#8 Ed25519 keys on
+        # modern OpenSSL builds; `openssl dgst -sign` accepts both
+        # PKCS#1 and PKCS#8 PEMs and produces a signature the app
+        # verifies byte-for-byte the same way (`ed25519-dalek.verify`).
+        # Signature is raw Ed25519 (no DER wrapping), matching the
+        # base64 64-byte payload the app expects.
         subprocess.run(
             [
                 "openssl",
-                "pkeyutl",
+                "dgst",
                 "-sign",
-                "-inkey",
                 str(pem_path),
-                "-in",
-                str(catalog_path),
                 "-out",
                 "catalog.json.sig",
+                str(catalog_path),
             ],
             check=True,
         )
