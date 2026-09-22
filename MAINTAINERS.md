@@ -5,10 +5,15 @@ require at least one approval before they can merge.
 
 ## Active maintainers
 
-| GitHub handle | Role | Public key fingerprint |
-|---|---|---|
-| @marcoasjunior | Lead maintainer, signing-key holder | TBD on first release |
-| _(add your handle here)_ | Co-maintainer | TBD on first release |
+| GitHub handle | Role | Public key fingerprint | Added |
+|---|---|---|---|
+| @marcoasjunior | Lead maintainer, signing-key holder | `e247ca4981f22245` | 2026-09-21 |
+| _(add your handle here)_ | Co-maintainer | _(pending)_ | — |
+
+The `e247ca4981f22245` fingerprint is `SHA-256(Mh/WGQ0kCviGtiX/8wLB5fqBCLgtVR/4smlVai13xs8=)[:8]`,
+matching the value embedded in Moddin Desktop's `BOOTSTRAP_PUBLIC_KEY_B64`
+constant. Apps verify this matches the public key in `public-keys.json`
+before trusting any signed catalog.
 
 Add yourself via a PR that updates this file and the matching
 `public-keys.json` entry. Two existing maintainers must approve.
