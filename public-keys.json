@@ -2,10 +2,20 @@
   "version": 1,
   "keys": [
     {
-      "handle": "@marcoasjunior",
+      "handle": "@moddin-bot",
       "role": "lead-maintainer",
       "active": true,
+      "addedAt": "2026-09-24T04:46:17Z",
+      "publicKey": "R2oSrMGh0d6pHIWFHZwvU+sA+wK1Uo/vaBq/L1WJ6GU=",
+      "fingerprint": "d489a3a0be894b19",
+      "addedBy": "moddin-desktop/key-rotation-2026-09-24"
+    },
+    {
+      "handle": "@marcoasjunior",
+      "role": "founding-maintainer",
+      "active": false,
       "addedAt": "2026-09-21T18:30:00Z",
+      "rotatedAt": "2026-09-24T04:46:17Z",
       "publicKey": "Mh/WGQ0kCviGtiX/8wLB5fqBCLgtVR/4smlVai13xs8=",
       "fingerprint": "e247ca4981f22245",
       "addedBy": "petonexus/moddin-community-capabilities/initial"

@@ -7,13 +7,25 @@ require at least one approval before they can merge.
 
 | GitHub handle | Role | Public key fingerprint | Added |
 |---|---|---|---|
-| @marcoasjunior | Lead maintainer, signing-key holder | `e247ca4981f22245` | 2026-09-21 |
+| @moddin-bot | Lead maintainer, signing-key holder | `d489a3a0be894b19` | 2026-09-24 |
 | _(add your handle here)_ | Co-maintainer | _(pending)_ | — |
 
-The `e247ca4981f22245` fingerprint is `SHA-256(Mh/WGQ0kCviGtiX/8wLB5fqBCLgtVR/4smlVai13xs8=)[:8]`,
+The `d489a3a0be894b19` fingerprint is `SHA-256(R2oSrMGh0d6pHIWFHZwvU+sA+wK1Uo/vaBq/L1WJ6GU=)[:8]`,
 matching the value embedded in Moddin Desktop's `BOOTSTRAP_PUBLIC_KEY_B64`
 constant. Apps verify this matches the public key in `public-keys.json`
 before trusting any signed catalog.
+
+### Past signing keys
+
+| Fingerprint | Public key | Status |
+|---|---|---|
+| `d489a3a0be894b19` | `R2oSrMGh0d6pHIWFHZwvU+sA+wK1Uo/vaBq/L1WJ6GU=` | active |
+| `e247ca4981f22245` | `Mh/WGQ0kCviGtiX/8wLB5fqBCLgtVR/4smlVai13xs8=` | rotated 2026-09-24 |
+
+The 2026-09-24 rotation was triggered by a catalog signature mismatch:
+the previous `.sig` no longer matched the catalog bytes (BOM / CRLF drift
+in the working tree). Apps older than the v0.1.0-beta.2 release that
+carries the new key will keep rejecting the new catalog until they update.
 
 Add yourself via a PR that updates this file and the matching
 `public-keys.json` entry. Two existing maintainers must approve.

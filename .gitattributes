@@ -1,0 +1,19 @@
+# Force LF line endings on JSON, YAML and shell scripts so the catalog and
+# signature stay byte-stable across Windows checkouts and PowerShell
+# edits. Without this, a `Set-Content -Encoding utf8` or a CRLF checkout
+# would silently change the bytes the maintainer signed, breaking the
+# signature for every Moddin install.
+*.json    text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.sh      text eol=lf
+*.nsi     text eol=lf
+
+# Treat Ed25519 signatures and public keys as binary even when they look
+# like text — they must never be touched by autocrlf or BOM magic.
+*.sig     binary
+*.pub     binary
+*.key     binary
+
+# Catalog assets are downloaded binaries; never normalize them.
+catalog.json binary
