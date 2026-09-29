@@ -1,40 +1,50 @@
 {
-    "version":  1,
-    "generatedAt":  "2026-09-22T17:38:00Z",
-    "generator":  "scripts/regenerate-catalog.py",
-    "capabilities":  [
-                         {
-                             "id":  "community-fps-unlocker",
-                             "version":  "1.0.0",
-                             "homepage":  "https://github.com/petonexus/moddin-community-capabilities/tree/main/capabilities/community-fps-unlocker",
-                             "downloadUrl":  "https://raw.githubusercontent.com/petonexus/moddin-community-capabilities/main/capabilities/community-fps-unlocker/capability.yaml",
-                             "configSchema":  [
-                                                  {
-                                                      "name":  "downloadUrl",
-                                                      "type":  "url",
-                                                      "required":  true
-                                                  },
-                                                  {
-                                                      "name":  "sha256",
-                                                      "type":  "sha256",
-                                                      "required":  true
-                                                  },
-                                                  {
-                                                      "name":  "version",
-                                                      "type":  "string",
-                                                      "required":  true
-                                                  },
-                                                  {
-                                                      "name":  "extractedDir",
-                                                      "type":  "path",
-                                                      "required":  true
-                                                  }
-                                              ],
-                             "safetyNotes":  [
-                                                 "FPS Unlocker modifies the game\u0027s rendering loop; some games\u0027 anti-cheat will flag it.",
-                                                 "Always close the game AND any overlay before applying or removing."
-                                             ],
-                             "signed":  false
-                         }
-                     ]
+  "version": 1,
+  "generatedAt": "2026-09-29T22:28:01Z",
+  "generator": "scripts/regenerate_catalog.py",
+  "capabilities": [
+    {
+      "id": "community-fps-unlocker",
+      "version": "0.0.0",
+      "displayName": "Community FPS Unlocker",
+      "category": "graphics",
+      "status": "planned",
+      "homepage": "https://github.com/petonexus/moddin-community-capabilities/tree/main/capabilities/community-fps-unlocker",
+      "downloadUrl": "https://raw.githubusercontent.com/petonexus/moddin-community-capabilities/main/capabilities/community-fps-unlocker/capability.yaml",
+      "configSchema": [
+        {
+          "name": "downloadUrl",
+          "type": "url",
+          "required": true,
+          "description": "HTTPS URL of the FPS Unlocker release archive (zip)."
+        },
+        {
+          "name": "sha256",
+          "type": "sha256",
+          "required": true,
+          "description": "Expected SHA-256 of the archive."
+        },
+        {
+          "name": "version",
+          "type": "string",
+          "required": true,
+          "description": "Upstream FPS Unlocker release tag."
+        },
+        {
+          "name": "processName",
+          "type": "string",
+          "required": true,
+          "description": "File name of the game process to close before files are replaced, without the .exe extension (e.g. DOOMx64). Moddin has no way to derive this from the catalogue, so it is asked for explicitly rather than guessed."
+        }
+      ],
+      "safetyNotes": [
+        "Install chain has not been verified against a real game yet, so this capability stays `planned`. The chain above is structurally correct — it downloads before it extracts, and the digest is checked before anything is written — but the archive layout of an FPS Unlocker build is not something this repository can assert, and the previous version of this file did assert it and shipped an install that could not run.",
+        "FPS Unlocker modifies the game's rendering loop; some games' anti-cheat (EAC, BattlEye) will flag it. Use at your own risk.",
+        "Always close the game AND any overlay (Steam, Discord, RivaTuner) before applying or removing.",
+        "Combined with OptiScaler the unlocked FPS may make frame-generation reordering visible; lower the cap if you see stutter.",
+        "There is no `uninstall` chain on purpose. The install is recorded in Moddin's transaction store, which records every file each step wrote; removing the capability rolls that back. A hand-written delete would be both redundant and, as a `file-delete` against a directory, impossible."
+      ],
+      "signed": false
+    }
+  ]
 }

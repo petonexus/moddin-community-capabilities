@@ -1,7 +1,7 @@
 id: community-fps-unlocker
 displayName: Community FPS Unlocker
 category: graphics
-status: available
+status: planned
 supportedEngines:
   - unreal5
   - redengine
@@ -20,10 +20,10 @@ configSchema:
     type: string
     required: true
     description: Upstream FPS Unlocker release tag.
-  - name: extractedDir
-    type: path
+  - name: processName
+    type: string
     required: true
-    description: Absolute path of the staging directory where the archive is extracted before files are copied into the game directory.
+    description: File name of the game process to close before files are replaced, without the .exe extension (e.g. DOOMx64). Moddin has no way to derive this from the catalogue, so it is asked for explicitly rather than guessed.
 checks:
   - id: archive-reachable
     label: FPS Unlocker archive reachable
@@ -44,26 +44,23 @@ checks:
       expectedField: sha256
 install:
   - kind: kill-process
-    description: Stop the game if it is still running before dropping files into its directory.
+    description: Close the game if it is still running before replacing its proxy DLL.
     params:
-      processName: '{{gameExecutableBaseName}}'
+      processNameField: processName
       force: false
+  - kind: download-file
+    description: Fetch the pinned archive into Moddin's download cache, verifying its digest before anything touches the game folder.
+    params:
+      urlField: downloadUrl
+      expectedField: sha256
+      target: community-fps-unlocker.zip
   - kind: extract-zip
-    description: Extract FPS Unlocker archive into the staging directory.
+    description: Extract the unlocked proxy next to the game executable.
     params:
-      archivePathField: downloadUrl
-  - kind: move-file
-    description: Promote the unlocked DXGI proxy into the game executable directory.
-    params:
-      fromField: extractedDir
-      toField: extractedDir
-uninstall:
-  - kind: file-delete
-    description: Remove the unlocked DXGI proxy dropped next to the game executable.
-    params:
-      pathField: extractedDir
-
+      archivePath: community-fps-unlocker.zip
 safetyNotes:
+  - Install chain has not been verified against a real game yet, so this capability stays `planned`. The chain above is structurally correct — it downloads before it extracts, and the digest is checked before anything is written — but the archive layout of an FPS Unlocker build is not something this repository can assert, and the previous version of this file did assert it and shipped an install that could not run.
   - FPS Unlocker modifies the game's rendering loop; some games' anti-cheat (EAC, BattlEye) will flag it. Use at your own risk.
   - Always close the game AND any overlay (Steam, Discord, RivaTuner) before applying or removing.
   - Combined with OptiScaler the unlocked FPS may make frame-generation reordering visible; lower the cap if you see stutter.
+  - There is no `uninstall` chain on purpose. The install is recorded in Moddin's transaction store, which records every file each step wrote; removing the capability rolls that back. A hand-written delete would be both redundant and, as a `file-delete` against a directory, impossible.
