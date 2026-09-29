@@ -24,7 +24,15 @@ from typing import Any
 
 import yaml
 
+# The kind sets below are checked against the Rust runner and the
+# TypeScript union by scripts/check-capability-kind-parity.mjs in the
+# Moddin Desktop repo. They drifted once already: `download-file` and
+# `exe-version` shipped in the backend while this validator still
+# rejected them, which meant a community author could not express the
+# recipe that CONTRIBUTING.md teaches as the minimum, nor a capability
+# whose checks run an exe-version gate. Do not edit one list alone.
 KNOWN_STEP_KINDS = {
+    "download-file",
     "extract-zip",
     "verify-hash",
     "file-delete",
@@ -42,6 +50,7 @@ KNOWN_CHECK_KINDS = {
     "file-absent",
     "archive-reachable",
     "archive-sha256",
+    "exe-version",
 }
 KNOWN_CATEGORIES = {"vr", "graphics", "qol", "system"}
 KNOWN_STATUSES = {"available", "planned"}
@@ -50,6 +59,7 @@ KNOWN_STEP_CHECK_CATEGORIES = {"global", "category", "modulespecific"}
 
 HEX_256 = re.compile(r"^[a-f0-9]{64}$", re.IGNORECASE)
 HTTPS_URL = re.compile(r"^https://", re.IGNORECASE)
+PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 def _fail(errors: list[str], message: str) -> None:
@@ -146,6 +156,111 @@ def _check_absolute_path(errors: list[str], value: str, parent: str) -> None:
         _fail(errors, f"{parent} must be an absolute path (got {value!r})")
 
 
+def _check_templates(errors: list[str], spec: dict) -> None:
+    """Every `{placeholder}` in a step param must name a config field.
+
+    `render_template` in builtin_steps.rs substitutes `{name}` from the
+    resolved config and leaves anything it cannot resolve verbatim.
+    A `{{name}}` placeholder in a plain string param has no engine at
+    all -- the parameter is used as a literal.
+
+    The shipped `community-fps-unlocker` capability was exactly this:
+    `processName: '{{gameExecutableBaseName}}'`, copied from the
+    template, naming a field no schema declared. Nothing caught it, and
+    `kill-process` would simply never match a process.
+    """
+    declared = {
+        field.get("name")
+        for field in spec.get("configSchema") or []
+        if isinstance(field, dict)
+    }
+    for section in ("install", "uninstall"):
+        steps = spec.get(section)
+        if not isinstance(steps, list):
+            continue
+        for index, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            params = step.get("params")
+            if not isinstance(params, dict):
+                continue
+            for key, value in params.items():
+                if not isinstance(value, str):
+                    continue
+                for name in PLACEHOLDER.findall(value):
+                    if name not in declared:
+                        _fail(
+                            errors,
+                            f"{section}[{index}].params.{key} references "
+                            f"{{{name}}} but the capability declares no config field "
+                            f"with that name; the runner has no engine for it and would "
+                            f"use the literal text "
+                            f"(declared: {sorted(n for n in declared if n)})",
+                        )
+
+
+def _check_install_chain(errors: list[str], spec: dict) -> None:
+    """Structural checks that catch recipes which cannot install.
+
+    Each of these shipped at least once in this project's own specs or
+    in the community catalogue, and none of them produced an error the
+    recipe author would recognise as "this recipe is wrong".
+    """
+    field_types = {
+        field.get("name"): field.get("type")
+        for field in spec.get("configSchema") or []
+        if isinstance(field, dict)
+    }
+
+    for section in ("install", "uninstall"):
+        steps = spec.get(section)
+        if not isinstance(steps, list):
+            continue
+        for index, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            kind = step.get("kind")
+            params = step.get("params") or {}
+            if not isinstance(params, dict):
+                continue
+
+            # `extract-zip` reads a local path. A field of type `url`
+            # is never one: `resolve_download_path` only special-cases a
+            # bare filename and otherwise joins the URL onto the game
+            # directory, which fails at install time with a
+            # file-not-found the user cannot act on.
+            if kind == "extract-zip":
+                archive_field = params.get("archivePathField")
+                if isinstance(archive_field, str) and field_types.get(archive_field) == "url":
+                    _fail(
+                        errors,
+                        f"{section}[{index}] extract-zip reads archivePathField "
+                        f"'{archive_field}', which is declared type 'url'. extract-zip "
+                        f"needs a local file: add a download-file step that fetches "
+                        f"'{archive_field}' into Moddin's cache first, and point "
+                        f"archivePath at the bare filename it saves.",
+                    )
+                archive_literal = params.get("archivePath")
+                if isinstance(archive_literal, str) and "://" in archive_literal:
+                    _fail(
+                        errors,
+                        f"{section}[{index}] extract-zip points archivePath at a URL "
+                        f"({archive_literal}); it needs a local file path.",
+                    )
+
+            # A move whose source and destination resolve to the same
+            # path is a no-op that Windows reports as an error.
+            if kind == "move-file":
+                source = params.get("fromField", params.get("from"))
+                destination = params.get("toField", params.get("to"))
+                if source is not None and source == destination:
+                    _fail(
+                        errors,
+                        f"{section}[{index}] move-file has the same source and "
+                        f"destination ('{source}'); it cannot do anything.",
+                    )
+
+
 def validate_capability_file(path: Path) -> list[str]:
     errors: list[str] = []
     try:
@@ -201,6 +316,9 @@ def validate_capability_file(path: Path) -> list[str]:
         isinstance(note, str) for note in spec["safetyNotes"]
     ):
         errors.append("safetyNotes must be a list of strings")
+
+    _check_templates(errors, spec)
+    _check_install_chain(errors, spec)
 
     return errors
 
