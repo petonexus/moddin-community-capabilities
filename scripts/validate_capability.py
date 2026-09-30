@@ -34,6 +34,8 @@ import yaml
 KNOWN_STEP_KINDS = {
     "download-file",
     "extract-zip",
+    "git-checkout",
+    "build-project",
     "verify-hash",
     "file-delete",
     "write-text-file",
@@ -60,6 +62,11 @@ KNOWN_STEP_CHECK_CATEGORIES = {"global", "category", "modulespecific"}
 HEX_256 = re.compile(r"^[a-f0-9]{64}$", re.IGNORECASE)
 HTTPS_URL = re.compile(r"^https://", re.IGNORECASE)
 PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+FULL_COMMIT = re.compile(r"^[a-f0-9]{40}$", re.IGNORECASE)
+# Git refuses these inside a ref name, and `git-checkout` refuses them
+# too; the validator exists so the author finds out here rather than
+# halfway through an install.
+REF_FORBIDDEN = re.compile(r"(\.\.|@\{|[\s~^:?*\[\\])")
 
 
 def _fail(errors: list[str], message: str) -> None:
@@ -156,6 +163,91 @@ def _check_absolute_path(errors: list[str], value: str, parent: str) -> None:
         _fail(errors, f"{parent} must be an absolute path (got {value!r})")
 
 
+def _check_pinned_ref(errors: list[str], value: str, parent: str) -> None:
+    """A `git-checkout` ref must name one immutable object.
+
+    The runner refuses a branch, `HEAD`, an abbreviated commit and a
+    name git would not accept as a ref. Everything a recipe can be
+    checked against statically is checked here, so the author reads the
+    error before an install does.
+
+    The one thing this cannot check is the *value* a `refField` resolves
+    to at install time -- the runner re-checks it then.
+    """
+    reference = value.strip()
+    if not reference:
+        _fail(errors, f"{parent} must not be empty")
+        return
+    if FULL_COMMIT.match(reference):
+        return
+    if 4 <= len(reference) < 40 and re.fullmatch(r"[a-fA-F0-9]+", reference):
+        _fail(
+            errors,
+            f"{parent} is '{reference}', an abbreviated commit. Two commits can share a "
+            f"short prefix, so pin the full 40-character SHA and the install reproduces.",
+        )
+        return
+    if reference.lower() in {"head", "main", "master", "latest"} or reference.startswith(
+        ("refs/heads/", "heads/")
+    ):
+        _fail(
+            errors,
+            f"{parent} is '{reference}', a branch or a floating ref. git-checkout pins an "
+            f"exact tag (refs/tags/<tag>) or the full 40-character commit SHA, because a "
+            f"branch can move after the install.",
+        )
+        return
+    if reference.count("/") and not reference.startswith("refs/tags/"):
+        _fail(
+            errors,
+            f"{parent} is '{reference}', an unqualified name with a '/' in it. That could be "
+            f"a branch path; write the tag in full (refs/tags/<tag>) or pin the commit SHA.",
+        )
+        return
+    name = reference.removeprefix("refs/tags/")
+    if REF_FORBIDDEN.search(name) or name.endswith("/") or name.endswith(".lock"):
+        _fail(
+            errors,
+            f"{parent} is '{reference}', which is not a ref name git accepts.",
+        )
+
+
+def _check_staging_subdir(errors: list[str], spec: dict, parent: str, field_types: dict) -> None:
+    """`extract-zip`'s staging directory has to stay where it says it is.
+
+    The step writes every archive member below this directory, so a
+    value that walks out of it is a recipe that scatters a download
+    across the disk instead of extracting it.
+    """
+    literal = spec.get("targetSubdir")
+    if literal is not None:
+        if not isinstance(literal, str) or not literal.strip():
+            _fail(errors, f"{parent}.targetSubdir must be a non-empty relative path")
+            return
+        if Path(literal).is_absolute():
+            _fail(
+                errors,
+                f"{parent}.targetSubdir is '{literal}', an absolute path. extract-zip writes "
+                f"below the executable directory; use a `path`-typed config field and "
+                f"targetSubdirField when the staging area is genuinely elsewhere.",
+            )
+        if ".." in Path(literal).parts:
+            _fail(
+                errors,
+                f"{parent}.targetSubdir is '{literal}', which walks out of the directory the "
+                f"archive extracts into. Use a plain subdirectory name.",
+            )
+        return
+    field = spec.get("targetSubdirField")
+    if isinstance(field, str) and field not in field_types:
+        _fail(
+            errors,
+            f"{parent}.targetSubdirField names '{field}', which the capability declares no "
+            f"config field for; the step would extract into the game directory instead of "
+            f"the staging area (declared: {sorted(field_types)}).",
+        )
+
+
 def _check_templates(errors: list[str], spec: dict) -> None:
     """Every `{placeholder}` in a step param must name a config field.
 
@@ -246,6 +338,44 @@ def _check_install_chain(errors: list[str], spec: dict) -> None:
                         errors,
                         f"{section}[{index}] extract-zip points archivePath at a URL "
                         f"({archive_literal}); it needs a local file path.",
+                    )
+                _check_staging_subdir(
+                    errors, params, f"{section}[{index}].params", field_types
+                )
+
+            # A `git-checkout` that names a branch builds whatever the
+            # branch happens to point at today, so two installs of the
+            # same recipe can produce different binaries. The runner
+            # refuses it; this is the same rule one step earlier.
+            if kind == "git-checkout":
+                literal = params.get("ref")
+                if literal is not None and not isinstance(literal, str):
+                    # `ref: 1.8` is a YAML float and `ref: 2024` an
+                    # integer, not a tag. Without this the ref vanishes
+                    # into a number and the step fails at install time.
+                    _fail(
+                        errors,
+                        f"{section}[{index}].params.ref is {literal!r}, not a string. Quote the "
+                        f"tag or SHA (ref: '1.8').",
+                    )
+                elif isinstance(literal, str):
+                    _check_pinned_ref(
+                        errors, literal, f"{section}[{index}].params.ref"
+                    )
+                field = params.get("refField")
+                if isinstance(field, str) and field not in field_types:
+                    _fail(
+                        errors,
+                        f"{section}[{index}] git-checkout pins refField '{field}', which "
+                        f"the capability declares no config field for (declared: "
+                        f"{sorted(field_types)}).",
+                    )
+                repository = params.get("repo")
+                if isinstance(repository, str) and not HTTPS_URL.match(repository):
+                    _fail(
+                        errors,
+                        f"{section}[{index}] git-checkout repo must start with https:// "
+                        f"(got {repository!r}).",
                     )
 
             # A move whose source and destination resolve to the same
