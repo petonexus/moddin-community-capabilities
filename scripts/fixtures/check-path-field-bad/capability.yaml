@@ -1,0 +1,36 @@
+# Fixture for the validator rule that a file-exists / file-absent check
+# cannot be handed an absolute path. Both checks below resolve their target
+# through path_guard::safe_join_relative, which returns Err for a RootDir or
+# Prefix component, so each one could only ever report an error:
+#
+#   checks[0] reads a field declared type: path (absolute by declaration)
+#   checks[1] is handed an absolute path literal
+#
+# Expected: validate_capability_file() reports exactly those two errors. Run
+# by scripts/test_validator.py.
+id: check-path-field-bad
+displayName: Fixture - absolute paths in file checks
+category: qol
+status: planned
+supportedEngines: []
+configSchema:
+  - name: tweakFile
+    type: path
+    required: true
+checks:
+  - id: tweak-written
+    label: Tweak file was written
+    kind: file-exists
+    severity: info
+    category: modulespecific
+    params:
+      pathField: tweakFile
+  - id: staging-cleared
+    label: Staged copy was promoted
+    kind: file-absent
+    severity: info
+    category: modulespecific
+    params:
+      path: 'C:\Games\Example\moddin\community-example.tmp'
+safetyNotes:
+  - Deliberately invalid. See the comment at the top of this file.

@@ -42,7 +42,7 @@ See [`SUBMITTING.md`](SUBMITTING.md) for the contributor flow and [`SECURITY.md`
 {
   "version": 1,
   "generatedAt": "2026-09-21T18:30:00Z",
-  "generator": "scripts/regenerate-catalog.py",
+  "generator": "scripts/regenerate_catalog.py",
   "signature": {
     "algorithm": "ed25519",
     "publicKey": "...",
@@ -83,8 +83,10 @@ moddin-community-capabilities/
 │       ├── CHANGELOG.md            ← recommended (one entry per release)
 │       └── SIGNED-BY               ← optional Ed25519 public key
 ├── scripts/
-│   ├── regenerate-catalog.py       ← rebuilds catalog.json + signs
-│   ├── validate-capability.py     ← local pre-commit check
+│   ├── regenerate_catalog.py       ← rebuilds catalog.json + signs
+│   ├── validate_capability.py     ← local pre-commit check
+│   ├── test_validator.py           ← failing/passing fixture per validator rule
+│   ├── fixtures/                   ← deliberately broken capabilities (not shipped)
 │   └── sign.py                     ← Ed25519 keypair helper
 └── .github/workflows/
     ├── validate.yml                ← runs on PR: schema + kind + sha256
@@ -102,7 +104,7 @@ mkdir capabilities/community-my-mod
 # 3. Write capability.yaml (see SUBMITTING.md for the schema)
 cp scripts/template.yaml capabilities/community-my-mod/capability.yaml
 # 4. Validate locally
-python scripts/validate-capability.py capabilities/community-my-mod/capability.yaml
+python scripts/validate_capability.py capabilities/community-my-mod/capability.yaml
 # 5. (Optional) Sign with your Ed25519 key
 python scripts/sign.py capabilities/community-my-mod/capability.yaml
 # 6. Open PR — CI will validate, maintainer will review

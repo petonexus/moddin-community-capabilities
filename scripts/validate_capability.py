@@ -91,6 +91,15 @@ HEX_256 = re.compile(r"^[a-f0-9]{64}$", re.IGNORECASE)
 HTTPS_URL = re.compile(r"^https://", re.IGNORECASE)
 PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 FULL_COMMIT = re.compile(r"^[a-f0-9]{40}$", re.IGNORECASE)
+# Check kinds that resolve their target through
+# `path_guard::safe_join_relative`, which returns Err for a `RootDir` or
+# `Prefix` component -- an absolute path, or a drive-relative one. The
+# value is joined onto the game executable directory, so these three can
+# only ever be handed something relative to it. `archive-*` checks read a
+# URL and `process-running` reads a process name, so they are not in
+# here. Not a `KNOWN_` set: this is a property of how three existing
+# kinds resolve a path, not vocabulary the runner has to agree on.
+RELATIVE_PATH_CHECK_KINDS = {"file-exists", "file-absent", "exe-version"}
 # Git refuses these inside a ref name, and `git-checkout` refuses them
 # too; the validator exists so the author finds out here rather than
 # halfway through an install.
@@ -347,6 +356,87 @@ def _check_templates(errors: list[str], spec: dict) -> None:
                         )
 
 
+def _check_check_params(errors: list[str], spec: dict) -> None:
+    """Two rules over `checks` and `verify`, the sections `_check_templates` does not reach.
+
+    Both come from the same fact: the check dispatcher in
+    builtin_checks.rs has no `render_template` call anywhere, and the
+    three checks that look at the filesystem resolve their target
+    through `path_guard::safe_join_relative` rather than through
+    `resolve_write_target`.
+
+    1. No check param may contain a `{placeholder}`. A `*Field` param is
+       read as `config.get_string(field)` with the braces still in it, so
+       `processNameField: '{{processName}}'` looks up a field literally
+       named `{{processName}}`, which no schema declares, and the check
+       reports an error forever. That is the bug `community-fps-unlocker`
+       shipped in a *step*; the same token in a check is the same bug in
+       a section the old rule never scanned.
+
+    2. `file-exists`, `file-absent` and `exe-version` must not name a
+       `type: path` field, and must not be handed an absolute `path`
+       literal. `safe_join_relative` returns Err for any `RootDir` or
+       `Prefix` component -- "Path escapes the allowed root" -- so the
+       check can only ever resolve to an error. `type: path` means an
+       absolute path everywhere else in this project: the validator
+       enforces absolute defaults for it, `template.yaml` says so, and
+       the write steps do honour one. This is the same class as the
+       `extract-zip` / `archivePathField` rule above -- a field whose
+       declared type and the thing the step reads can never line up.
+    """
+    field_types = {
+        field.get("name"): field.get("type")
+        for field in spec.get("configSchema") or []
+        if isinstance(field, dict)
+    }
+    for section in ("checks", "verify"):
+        checks = spec.get(section)
+        if not isinstance(checks, list):
+            continue
+        for index, check in enumerate(checks):
+            if not isinstance(check, dict):
+                continue
+            params = check.get("params")
+            if not isinstance(params, dict):
+                continue
+            where = f"{section}[{index}].params"
+            for key, value in params.items():
+                if not isinstance(value, str):
+                    continue
+                for name in PLACEHOLDER.findall(value):
+                    _fail(
+                        errors,
+                        f"{where}.{key} is {value!r}, which contains a template "
+                        f"placeholder. The check dispatcher in builtin_checks.rs "
+                        f"never renders a template, so it reads the field name "
+                        f"'{name}' including the braces, which the capability "
+                        f"declares no config field for; the check would report an "
+                        f"error on every run (declared: "
+                        f"{sorted(n for n in field_types if n)}). Name the field "
+                        f"without braces.",
+                    )
+            if check.get("kind") in RELATIVE_PATH_CHECK_KINDS:
+                field = params.get("pathField")
+                if isinstance(field, str) and field_types.get(field) == "path":
+                    _fail(
+                        errors,
+                        f"{where}.pathField is '{field}', declared type 'path'. "
+                        f"{check['kind']} resolves it through safe_join_relative, "
+                        f"which refuses an absolute path, so the check could only "
+                        f"ever report an error. Declare the field type 'string' and "
+                        f"ask for a path relative to the game folder.",
+                    )
+                literal = params.get("path")
+                if isinstance(literal, str) and Path(literal).is_absolute():
+                    _fail(
+                        errors,
+                        f"{where}.path is {literal!r}, an absolute path. "
+                        f"{check['kind']} joins it onto the game folder and refuses "
+                        f"anything that is not relative to it ('Path escapes the "
+                        f"allowed root'). Use a path relative to the game folder.",
+                    )
+
+
 def _check_install_chain(errors: list[str], spec: dict) -> None:
     """Structural checks that catch recipes which cannot install.
 
@@ -505,6 +595,7 @@ def validate_capability_file(path: Path) -> list[str]:
         errors.append("safetyNotes must be a list of strings")
 
     _check_templates(errors, spec)
+    _check_check_params(errors, spec)
     _check_install_chain(errors, spec)
 
     return errors

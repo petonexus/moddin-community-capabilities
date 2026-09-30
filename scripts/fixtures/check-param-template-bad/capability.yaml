@@ -1,0 +1,25 @@
+# Fixture for the validator rule that rejects a `{placeholder}` in a check
+# param. builtin_checks.rs has no render_template call, so the runner looks
+# the field up under the name INCLUDING the braces and never finds it.
+#
+# Expected: validate_capability_file() reports one error, naming
+# checks[0].params.processNameField. Run by scripts/test_validator.py.
+id: check-param-template-bad
+displayName: Fixture - template placeholder in a check param
+category: qol
+status: planned
+supportedEngines: []
+configSchema:
+  - name: processName
+    type: string
+    required: true
+checks:
+  - id: game-running
+    label: Game is running
+    kind: process-running
+    severity: info
+    category: modulespecific
+    params:
+      processNameField: '{{processName}}'
+safetyNotes:
+  - Deliberately invalid. See the comment at the top of this file.

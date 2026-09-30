@@ -1,0 +1,145 @@
+id: community-specialk-tweak-profile
+displayName: Community Special K Tweak Profile
+version: 1.0.0
+description: Write a Special K tweak file into a game folder that already has the Special K loader installed.
+category: graphics
+# planned, not available. The install steps below are verified against the
+# runner, but the *upstream* half is not: which file name Special K reads,
+# which INI section and keys it honours, and which loader DLL a given game
+# carries are all upstream facts this repository cannot check. Flipping this
+# to available needs a maintainer to apply it to one real game and confirm
+# the loader picks the file up. See the safetyNotes.
+status: planned
+# Empty means "every engine", not "no engine": Special K hooks DirectX
+# below the engine, so it is not tied to an engine id. The runner's
+# engine_match treats an absent or empty list as engine-agnostic.
+supportedEngines: []
+configSchema:
+  - name: processName
+    type: string
+    required: true
+    description: >-
+      File name of the game process without the .exe, e.g. Game.exe -> Game.
+      Used both to close the game before the write and by the running-process
+      check.
+  - name: specialkLibrary
+    type: string
+    required: true
+    description: >-
+      File name of the Special K loader sitting in the game folder, e.g.
+      SpecialK64.dll. Declared as a string rather than a path because the
+      file-exists check resolves it through safe_join_relative, which
+      rejects an absolute path; give the bare file name.
+  - name: tweakFile
+    type: string
+    required: true
+    description: >-
+      Path of the tweak file to write, relative to the game folder, e.g.
+      SpecialK/moddin-tweaks.ini. Deliberately relative, not type: path -
+      a path written inside the game folder is inside the rollback scope, so
+      Undo restores whatever the file held before this install.
+  - name: enableOverlay
+    type: enum
+    enumValues:
+      - 'True'
+      - 'False'
+    required: true
+    description: Value written to EnableOverlay in the generated tweak file.
+  - name: frameRateLimit
+    type: number
+    required: true
+    description: >-
+      Frame cap written to FrameRateLimit. Whole number only: the runner
+      renders a template number through as_u64, so a fractional value is
+      written to the file as the literal text {frameRateLimit}.
+checks:
+  - id: specialk-installed
+    label: Special K loader is in the game folder
+    kind: file-exists
+    severity: blocker
+    category: modulespecific
+    description: >-
+      This recipe only writes a tweak file for an existing Special K
+      install; it does not install Special K itself.
+    params:
+      pathField: specialkLibrary
+  - id: game-running
+    label: Game is running (it will be closed)
+    kind: process-running
+    severity: info
+    category: modulespecific
+    description: >-
+      process-running passes when the process IS running, so this is the
+      install telling the user what kill-process is about to do.
+    params:
+      processNameField: processName
+verify:
+  - id: tweak-file-written
+    label: Tweak file was written
+    kind: file-exists
+    severity: info
+    category: modulespecific
+    params:
+      pathField: tweakFile
+  - id: staging-cleared
+    label: Staged copy was promoted
+    kind: file-absent
+    severity: info
+    category: modulespecific
+    description: >-
+      move-file renames the staged file onto the tweak file, so the staged
+      path must be gone once the install finishes.
+    params:
+      path: moddin/community-specialk-tweak-profile.tmp
+install:
+  - kind: kill-process
+    description: Close the game if it is still running.
+    params:
+      processNameField: processName
+      force: false
+  - kind: write-text-file
+    description: >-
+      Write the tweak body to a staging file in the game folder. Staging
+      first means a write that fails part-way cannot truncate the live tweak
+      file, and the runner snapshots the staged path before the write so
+      Undo removes it again.
+    params:
+      path: moddin/community-specialk-tweak-profile.tmp
+      template: |-
+        ; Written by Moddin Desktop - community-specialk-tweak-profile
+        ; Generated file: re-run the capability to change it, or edit it and
+        ; stop trusting Moddin to manage it. Undo restores the file that was
+        ; here before this install, if there was one.
+        [SpecialK]
+        EnableOverlay={enableOverlay}
+        FrameRateLimit={frameRateLimit}
+  - kind: move-file
+    description: >-
+      Promote the staged copy onto the configured tweak file, replacing what
+      was there. The runner snapshots both ends of a move before it runs, so
+      Undo puts the previous tweak file back.
+    params:
+      from: moddin/community-specialk-tweak-profile.tmp
+      to: '{tweakFile}'
+uninstall: []
+safetyNotes:
+  - >-
+    Not installable yet. The steps are verified against the runner, but the
+    Special K side is not: this repository cannot confirm which file name
+    Special K reads from a game folder, which INI section and keys it
+    honours, or which loader DLL a given game ships. A maintainer has to
+    apply it to one real game and watch the loader pick the file up before
+    this becomes available.
+  - >-
+    This recipe does not install Special K. The specialk-installed check
+    blocks the install if the loader is not already in the game folder.
+  - >-
+    Moddin does not disable anti-cheat. Injecting Special K into an
+    anti-cheat game is the user's decision and their risk.
+  - >-
+    tweakFile must stay inside the game folder. Written outside it, the
+    install still runs but the write is outside the rollback scope and Undo
+    will not put the previous file back.
+  - >-
+    Special K reads its tweak files when the game starts, so Moddin closes
+    the game before writing and the change takes effect on the next launch.

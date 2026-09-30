@@ -72,13 +72,13 @@ Conventions:
 ## Step 3 — validate locally
 
 ```bash
-python scripts/validate-capability.py capabilities/community-my-mod/capability.yaml
+python scripts/validate_capability.py capabilities/community-my-mod/capability.yaml
 ```
 
 This catches the most common PR-blocking mistakes before you push:
 
 - Missing required fields
-- Unknown `kind` values (only the 10 built-in step kinds are
+- Unknown `kind` values (only the step kinds the runner implements are
   accepted; adding new kinds requires a PR in the app repo)
 - Invalid `category` / `status` / `severity` values
 - `sha256` fields that don't look like hex
@@ -86,6 +86,22 @@ This catches the most common PR-blocking mistakes before you push:
 - `path` fields that aren't absolute
 - Duplicate `id` across the catalog
 - `id` that doesn't match the folder name
+- A `{placeholder}` in a `checks` or `verify` param. The check dispatcher
+  never renders a template, so `processNameField: '{{processName}}'` makes
+  the runner look up a field literally named `{{processName}}` and the
+  check can only report an error. Name the field without braces.
+- `file-exists`, `file-absent` and `exe-version` handed an absolute path —
+  either a `type: path` field or an absolute `path` literal. They resolve
+  their target with `safe_join_relative`, which refuses anything that is
+  not relative to the game folder. Declare the field `type: string` and ask
+  for a path relative to the game folder.
+
+If you are changing the validator itself, run its fixture suite — every
+rule needs a capability that fails it and one that passes:
+
+```bash
+python scripts/test_validator.py
+```
 
 ## Step 4 — sign (optional but recommended)
 

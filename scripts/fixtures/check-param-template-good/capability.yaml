@@ -1,0 +1,25 @@
+# The fix for fixtures/check-param-template-bad: the same check naming the
+# declared field directly. The runner reads it with config.get_string and
+# gets the process name.
+#
+# Expected: validate_capability_file() reports no errors. Run by
+# scripts/test_validator.py.
+id: check-param-template-good
+displayName: Fixture - declared field named directly
+category: qol
+status: planned
+supportedEngines: []
+configSchema:
+  - name: processName
+    type: string
+    required: true
+checks:
+  - id: game-running
+    label: Game is running
+    kind: process-running
+    severity: info
+    category: modulespecific
+    params:
+      processNameField: processName
+safetyNotes:
+  - Deliberately valid. See the comment at the top of this file.

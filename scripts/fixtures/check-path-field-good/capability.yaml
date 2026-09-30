@@ -1,0 +1,34 @@
+# The fix for fixtures/check-path-field-bad, and the shape the shipped
+# community-specialk-tweak-profile uses: a field declared type string whose
+# value is a path relative to the game folder, and a relative literal.
+# safe_join_relative joins both onto the game folder, which is what these
+# three check kinds want.
+#
+# Expected: validate_capability_file() reports no errors. Run by
+# scripts/test_validator.py.
+id: check-path-field-good
+displayName: Fixture - paths relative to the game folder
+category: qol
+status: planned
+supportedEngines: []
+configSchema:
+  - name: tweakFile
+    type: string
+    required: true
+checks:
+  - id: tweak-written
+    label: Tweak file was written
+    kind: file-exists
+    severity: info
+    category: modulespecific
+    params:
+      pathField: tweakFile
+  - id: staging-cleared
+    label: Staged copy was promoted
+    kind: file-absent
+    severity: info
+    category: modulespecific
+    params:
+      path: moddin/community-example.tmp
+safetyNotes:
+  - Deliberately valid. See the comment at the top of this file.
