@@ -66,6 +66,27 @@ KNOWN_STATUSES = {"available", "planned"}
 KNOWN_SEVERITIES = {"info", "warning", "blocker"}
 KNOWN_STEP_CHECK_CATEGORIES = {"global", "category", "modulespecific"}
 
+# The engine vocabulary, mirrored from the desktop runner's
+# `KNOWN_ENGINES` in `src-tauri/src/capability.rs`. This is a duplicate
+# list, which is exactly the shape of thing that drifts: the first
+# parity guard in this project missed a fifth list of step kinds and it
+# had already gone stale on its own. `scripts/check-capability-kind-parity.mjs`
+# in the desktop repo now compares engine ids across the runner, the
+# TypeScript union and this file, so a change to one is a red build in
+# the other.
+#
+# An engine id that is not in this set does not mean "every engine" — it
+# means the runner has no opinion about that engine, and a recipe
+# listing it can never match a game. An *empty* list is what means every
+# engine, and that is the repository's own template default.
+KNOWN_ENGINES = {
+    "idtech",
+    "re-engine",
+    "redengine",
+    "unity",
+    "unreal5",
+}
+
 HEX_256 = re.compile(r"^[a-f0-9]{64}$", re.IGNORECASE)
 HTTPS_URL = re.compile(r"^https://", re.IGNORECASE)
 PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -78,6 +99,34 @@ REF_FORBIDDEN = re.compile(r"(\.\.|@\{|[\s~^:?*\[\\])")
 
 def _fail(errors: list[str], message: str) -> None:
     errors.append(message)
+
+
+def _check_supported_engines(errors: list[str], spec: dict) -> None:
+    """Reject an engine id the runner has never heard of.
+
+    The desktop runner gates a recipe out of a game's list when the
+    recipe names engines and not the game's. An id outside its
+    vocabulary therefore does not mean "unrestricted" — it means a
+    match that can never happen, and the recipe is silently invisible
+    on every game. Failing here tells the author, instead.
+
+    An empty list is fine and means every engine, which is the
+    repository's own template default.
+    """
+    value = spec.get("supportedEngines")
+    if value is None:
+        return
+    if not isinstance(value, list):
+        _fail(errors, f"supportedEngines must be a list, got {type(value).__name__}")
+        return
+    for engine in value:
+        if not isinstance(engine, str) or engine not in KNOWN_ENGINES:
+            _fail(
+                errors,
+                f"supportedEngines: {engine!r} is not an engine the runner "
+                f"knows. Known engines: {', '.join(sorted(KNOWN_ENGINES))}. "
+                f"Use an empty list to mean every engine.",
+            )
 
 
 def _check_field_string(errors: list[str], spec: dict, path: str, key: str) -> None:
@@ -424,6 +473,7 @@ def validate_capability_file(path: Path) -> list[str]:
     _check_field_string(errors, spec, "", "displayName")
     _check_field_enum(errors, spec, "", "category", KNOWN_CATEGORIES, "category")
     _check_field_enum(errors, spec, "", "status", KNOWN_STATUSES, "status")
+    _check_supported_engines(errors, spec)
 
     if isinstance(spec.get("configSchema"), list):
         _check_schema_fields(errors, spec["configSchema"], "configSchema")
