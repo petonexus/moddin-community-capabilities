@@ -9,7 +9,14 @@ Exit codes:
 
 Run locally before opening a PR:
     python scripts/validate_capability.py path/to/capability.yaml
-    python scripts/validate_capability.py capabilities/             # whole tree
+    python scripts/validate_capability.py capabilities/           # whole tree
+    python scripts/validate_capability.py revoked-ids.json        # the kill switch
+    python scripts/validate_capability.py catalog.json           # the signed copy
+
+The last one also checks that the revocations embedded in a generated
+catalog still match revoked-ids.json. The app reads the signed copy
+only, so a source edit that was never regenerated is a revocation that
+is not in force.
 """
 
 from __future__ import annotations
@@ -453,6 +460,136 @@ def validate_capability_file(path: Path) -> list[str]:
     return errors
 
 
+def validate_revocations_file(path: Path) -> list[str]:
+    """Check `revoked-ids.json` against the shape the app reads.
+
+    This is the human-maintained *input*. `regenerate_catalog.py`
+    inlines it into `catalog.json` and the maintainer signs the result,
+    so this file alone decides nothing — but a malformed value here
+    would be a malformed `revoked` field in every signed catalog after
+    it, and the app refuses those outright. Catching it here says so at
+    review time instead of at install time.
+    """
+    errors: list[str] = []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return [f"{path}: could not be read as JSON: {error}"]
+
+    if not isinstance(payload, dict):
+        return [f"{path}: top level must be an object with a 'revoked' list"]
+
+    errors.extend(_check_revocation_list(payload.get("revoked"), f"{path}"))
+    return errors
+
+
+def _check_revocation_list(raw: Any, label: str) -> list[str]:
+    """The exact shape `parse_revocations` enforces on the app side.
+
+    Kept deliberately in step with `moddin-desktop`'s
+    `src-tauri/src/community_catalog.rs`: a valid signature does not
+    make a broken value trustworthy, and the app's answer to a broken
+    value is to refuse every community install.
+    """
+    errors: list[str] = []
+    if not isinstance(raw, list):
+        kind = type(raw).__name__
+        return [f"{label}: 'revoked' must be a list, got {kind}"]
+
+    seen: set[str] = set()
+    for index, entry in enumerate(raw):
+        where = f"{label}: revoked[{index}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{where} must be an object, got {type(entry).__name__}")
+            continue
+        identifier = entry.get("id")
+        if not isinstance(identifier, str) or not identifier.strip():
+            errors.append(
+                f"{where}.id must be a non-empty string — an entry without one "
+                "cannot be matched to a capability, so the app would ignore it"
+            )
+            continue
+        reason = entry.get("reason", "")
+        if not isinstance(reason, str):
+            errors.append(
+                f"{where}.reason must be a string, got {type(reason).__name__}"
+            )
+            continue
+        if identifier in seen:
+            errors.append(
+                f"{where} lists '{identifier}', which is already revoked earlier "
+                "in the list. The app shows the first reason; keep one entry per id."
+            )
+            continue
+        seen.add(identifier.strip())
+    return errors
+
+
+def validate_catalog_file(path: Path) -> list[str]:
+    """Check the `revoked` list embedded in a generated `catalog.json`.
+
+    Two things matter here, and only the first is about shape:
+
+    1. the embedded list is well-formed, because the app refuses the
+       whole catalogue when it is not;
+    2. it matches `revoked-ids.json`, because the signed catalogue is
+       the *only* copy of the kill switch the app ever reads. A
+       revocation edited into the source file and never regenerated
+       does not ship, and nothing else in the pipeline notices.
+
+    Run it after regenerating:
+        python scripts/validate_capability.py catalog.json
+    """
+    errors: list[str] = []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return [f"{path}: could not be read as JSON: {error}"]
+
+    if not isinstance(payload, dict):
+        return [f"{path}: top level must be an object"]
+
+    capabilities = payload.get("capabilities")
+    if not isinstance(capabilities, list):
+        errors.append(f"{path}: 'capabilities' must be a list")
+
+    if "revoked" not in payload:
+        # Read as "nothing is revoked" by the app, so it is legal — but
+        # `regenerate_catalog.py` always emits the key, so its absence
+        # means this catalog predates the inlined revocations and needs
+        # re-generating before it is signed again.
+        errors.append(
+            f"{path}: no 'revoked' key. The app reads that as 'nothing is "
+            "revoked'. Re-run scripts/regenerate_catalog.py and re-sign."
+        )
+    else:
+        errors.extend(_check_revocation_list(payload.get("revoked"), str(path)))
+
+    source = path.parent / "revoked-ids.json"
+    if errors or not source.is_file():
+        return errors
+
+    source_ids = {
+        entry["id"]
+        for entry in json.loads(source.read_text(encoding="utf-8"))["revoked"]
+    }
+    catalog_ids = {
+        entry["id"]
+        for entry in payload["revoked"]
+    }
+    if source_ids != catalog_ids:
+        only_source = ", ".join(sorted(source_ids - catalog_ids)) or "(none)"
+        only_catalog = ", ".join(sorted(catalog_ids - source_ids)) or "(none)"
+        errors.append(
+            f"{path}: the embedded revocations do not match {source.name}. "
+            f"Only in {source.name}: {only_source}. Only in {path.name}: "
+            f"{only_catalog}. Re-run scripts/regenerate_catalog.py and re-sign — "
+            "the app reads the signed copy, so a mismatch here means a "
+            "revocation is not actually in force."
+        )
+    return errors
+
+
 def validate_tree(root: Path) -> int:
     base = root if root.name == "capabilities" else root / "capabilities"
     paths = sorted(Path(p) for p in glob.glob(str(base / "*" / "capability.yaml")))
@@ -470,6 +607,22 @@ def validate_tree(root: Path) -> int:
                 print(f"  - {err}", file=sys.stderr)
         else:
             print(f"[OK]   {path}")
+
+    # The revocation list is a repo-level input to the catalog, so it is
+    # checked whenever the repo is, not only when someone remembers to
+    # name it. The generated catalog's copy of it is a separate check —
+    # run `python scripts/validate_capability.py catalog.json` for that.
+    revocations = base.parent / "revoked-ids.json"
+    if revocations.is_file():
+        errors = validate_revocations_file(revocations)
+        if errors:
+            failed = True
+            print(f"\n[FAIL] {revocations}", file=sys.stderr)
+            for err in errors:
+                print(f"  - {err}", file=sys.stderr)
+        else:
+            print(f"[OK]   {revocations}")
+
     return 1 if failed else 0
 
 
@@ -482,7 +635,12 @@ def main(argv: list[str]) -> int:
         return validate_tree(targets[0])
     failed = False
     for path in targets:
-        errors = validate_capability_file(path)
+        if path.name == "revoked-ids.json":
+            errors = validate_revocations_file(path)
+        elif path.name == "catalog.json":
+            errors = validate_catalog_file(path)
+        else:
+            errors = validate_capability_file(path)
         if errors:
             failed = True
             print(f"\n[FAIL] {path}", file=sys.stderr)

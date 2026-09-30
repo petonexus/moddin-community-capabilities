@@ -7,6 +7,12 @@ on:
       - 'capabilities/**'
       - 'catalog.json'
       - 'scripts/regenerate_catalog.py'
+      # regenerate_catalog.py inlines revoked-ids.json into catalog.json
+      # before signing. Without this path a push that only adds a
+      # revocation rebuilds nothing, so the signature keeps covering a
+      # catalogue that no longer lists it and the revocation is
+      # accepted by the repo and ignored by the app.
+      - 'revoked-ids.json'
 
 jobs:
   catalog:

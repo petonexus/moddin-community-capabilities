@@ -5,12 +5,31 @@ on:
     paths:
       - 'capabilities/**'
       - 'scripts/**'
+      # The revocation list is inlined into catalog.json before it is
+      # signed, so a change to it changes the signed bytes. It was
+      # missing here and in build-catalog.yml, which meant a PR adding
+      # a revocation ran no validation and rebuilt no catalog: the
+      # revocation silently did not ship.
+      - 'revoked-ids.json'
+      - 'catalog.json'
       - '.github/workflows/validate.yml'
   push:
     branches: [main]
     paths:
       - 'capabilities/**'
       - 'scripts/**'
+      - 'revoked-ids.json'
+      # catalog.json is deliberately absent here but present on the PR
+      # trigger. build-catalog.yml regenerates and re-signs the
+      # catalogue on every push to main, and it watches revoked-ids.json
+      # too, so main's catalogue is produced by that job rather than by
+      # hand. Validating it on push would race the bot commit and report
+      # a red that the next job fixes seconds later. On a pull request
+      # the check is what earns its keep: it refuses a revocation that
+      # was merged without regenerating, which is the case that would
+      # otherwise ship signed-but-stale and be silently ignored by
+      # every client.
+      #
 
 jobs:
   validate:
@@ -34,28 +53,19 @@ jobs:
           set -euo pipefail
           python scripts/validate_capability.py capabilities/
 
-      - name: Validate catalog.json shape
+      # The validator owns these shapes. The inline json.load checks
+      # that used to live here duplicated it, and the duplication is
+      # how a shape drifts: the app-side reader and CI were two
+      # independent opinions about the same file. `validate_catalog_file`
+      # additionally checks catalog.json against revoked-ids.json, so
+      # a regenerated catalogue that forgot an entry is caught here
+      # rather than by a user whose revocation silently stopped
+      # applying.
+      - name: Validate catalog.json and revoked-ids.json
         run: |
           set -euo pipefail
-          python -c "
-          import json, sys
-          catalog = json.load(open('catalog.json'))
-          assert catalog['version'] == 1
-          ids = [c['id'] for c in catalog['capabilities']]
-          assert len(ids) == len(set(ids)), f'duplicate ids in catalog: {ids}'
-          print(f'catalog.json looks valid ({len(ids)} capabilities)')
-          "
-
-      - name: Validate revoked-ids.json shape
-        run: |
-          set -euo pipefail
-          python -c "
-          import json
-          revoked = json.load(open('revoked-ids.json'))
-          assert 'revoked' in revoked
-          assert isinstance(revoked['revoked'], list)
-          print(f'revoked-ids.json: {len(revoked[\"revoked\"])} entries')
-          "
+          python scripts/validate_capability.py catalog.json
+          python scripts/validate_capability.py revoked-ids.json
 
       - name: Fail on accidental signing key commit
         run: |

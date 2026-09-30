@@ -145,11 +145,15 @@ toggle in `Settings → Privacy`).
 
 ### Layer 6 — kill switch
 
-A capability can be revoked by adding its `id` to
-`revoked-ids.json` in this repo. The app consults this list before
-loading any capability. Revocation propagates within one catalog TTL.
+A capability is revoked by adding its `id` to `revoked-ids.json` in this
+repo. That file is the **human-maintained input**. It is *not* what the
+app reads: `scripts/regenerate_catalog.py` inlines it into the top-level
+`revoked` array of `catalog.json`, and the maintainer signs the result.
+One Ed25519 signature therefore covers the capability list and the
+revocation list together, and the two cannot disagree.
 
-```
+```json
+// revoked-ids.json — the input maintainers edit
 {
   "revoked": [
     { "id": "compromised-mod", "reason": "..." },
@@ -157,6 +161,80 @@ loading any capability. Revocation propagates within one catalog TTL.
   ]
 }
 ```
+
+```json
+// catalog.json — the signed artefact the app actually reads
+{
+  "version": 1,
+  "capabilities": [ ... ],
+  "revoked": [
+    { "id": "compromised-mod", "reason": "..." }
+  ]
+}
+```
+
+Revocation propagates within one catalog TTL.
+
+#### Why it is not a separate file any more
+
+While `revoked-ids.json` was fetched over its own GET, the kill switch
+was the one unsigned thing in the trust chain, and the cache
+re-verification could not cover it: the list is trusted *precisely when
+it is stale*, so an attacker who could intercept that one request could
+suppress a revocation until the TTL expired, and the app had no way to
+tell. Inlining it removes the second channel rather than trying to
+verify it.
+
+The same change moves the check. The app used to consult the kill
+switch **before** the signature, deliberately: an unsigned list can only
+add refusals and never remove one, so checking it first could not weaken
+anything. That ordering is gone, and deliberately so — there is nothing
+left to read before the signature. What replaces it is stronger. An
+attacker who edits the `revoked` array now edits `catalog.json`, which
+breaks the signature and refuses **every** community install outright,
+rather than quietly restoring one. A tampered list can no longer remove
+a refusal, because there is no untampered-of list to remove it from.
+
+#### How the app reads `revoked`
+
+| Signed catalogue contains | The app does |
+|---|---|
+| `revoked` with a well-formed array | revokes those ids |
+| **no `revoked` key at all** (or `revoked: null`) | **treats it as "nothing is revoked" and installs normally** |
+| `revoked` of the wrong type, or an entry with no usable `id` | **refuses every community install** |
+| a signature that does not verify | **refuses every community install, revoked or not** |
+
+The absent-key row is a decision, and it is the safe direction. An
+absent key cannot be treated as a failure without two bad outcomes: it
+adds no protection (an attacker able to strip the key could rewrite the
+whole catalog, and the signature check refuses everything anyway) while
+bricking community installs against any catalog generated before the
+field existed. Reading it as "nothing is revoked" cannot be exploited,
+because a stripped key still has to survive the signature.
+
+The malformed row is the opposite case and does fail closed. A broken
+`revoked` value is not a statement by the maintainer, it is an app that
+cannot tell a revoked capability from a live one. Guessing is exactly
+the bounded-but-wrong reading the app avoids everywhere else, so the
+whole catalog is refused. `scripts/validate_capability.py` checks the
+same shape, and `regenerate_catalog.py` refuses to write a catalog at
+all if `revoked-ids.json` is malformed — the mistake surfaces at review
+time, not at install time.
+
+A `revoked` entry with no `reason` still revokes; the app substitutes
+"no reason published" rather than reading the missing field as "not
+really revoked".
+
+#### Revocation and rollback
+
+Revocation governs **installs**, not restores. A snapshot restore copies
+files back from the transaction's own backups and never reads the
+catalog, so a user who installed a capability before it was revoked can
+still undo or restore it. That asymmetry is intentional: revocation
+stops new installs of a mod that should no longer be downloaded, and
+refusing to restore would strand a user with files they cannot get back
+out of their game folder. A user who uninstalls a revoked capability
+and tries to install it again is blocked — that is the point.
 
 ## Reporting a vulnerability
 

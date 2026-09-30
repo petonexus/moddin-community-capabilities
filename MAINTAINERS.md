@@ -42,6 +42,62 @@ Add yourself via a PR that updates this file and the matching
   the regenerated `catalog.json` and `public-keys.json` before
   approving the workflow run.
 
+## Revoking a capability
+
+`revoked-ids.json` is the file maintainers edit. It is **not** what the
+app reads: `scripts/regenerate_catalog.py` inlines it into `catalog.json`
+and the maintainer signs the result, so one signature covers the
+capability list and the kill switch together. See SECURITY.md, "Layer 6
+— kill switch", for why.
+
+1. Add the entry to `revoked-ids.json`:
+
+   ```json
+   { "revoked": [{ "id": "compromised-mod", "reason": "why, in one line" }] }
+   ```
+
+2. Check the shape:
+
+   ```bash
+   python scripts/validate_capability.py revoked-ids.json
+   ```
+
+3. Regenerate **and re-sign** the catalog. Both steps are required — a
+   `revoked-ids.json` edit that was never regenerated is a revocation
+   that is not in force, and the app only ever reads the signed copy:
+
+   ```bash
+   MODDIN_SIGNING_KEY="$(cat ~/.moddin/signing-key)" \
+       python scripts/regenerate_catalog.py
+   ```
+
+   Without `MODDIN_SIGNING_KEY` the script deliberately writes
+   `catalog.json` and skips the signature. That is fine for a dry run
+   and a disaster to commit: the stale `catalog.json.sig` no longer
+   matches, and every install in the field is refused until a real key
+   is used.
+
+4. Confirm the copy in the catalog matches the source, then commit
+   `revoked-ids.json`, `catalog.json` **and** `catalog.json.sig`
+   together:
+
+   ```bash
+   python scripts/validate_capability.py catalog.json
+   ```
+
+   That check fails if the embedded `revoked` array has drifted from
+   `revoked-ids.json`, which is the failure mode this arrangement
+   invites.
+
+5. The revoke is live within one catalog TTL, and immediately on a user
+   hitting Refresh.
+
+A revocation is not a removal. A user who installed a capability before
+it was revoked can still restore a snapshot taken while it was
+installed — restores work from the transaction's own backups and never
+read the catalog. A user who uninstalls and tries to reinstall is
+blocked.
+
 ## What you cannot merge
 
 - A PR that adds a new step kind. New kinds belong in the
@@ -50,6 +106,10 @@ Add yourself via a PR that updates this file and the matching
 - A PR that disables a CI gate.
 - A PR that revokes a previously merged capability **without**
   including a public `revoked-ids.json` entry in the same PR.
+- A PR that edits `revoked-ids.json` **without** the regenerated
+  `catalog.json` and its matching `catalog.json.sig`. The app reads the
+  signed copy only, so the revocation is not in force until all three
+  land together.
 
 ## Off-boarding
 
