@@ -38,6 +38,8 @@ import sys
 from pathlib import Path
 
 import yaml
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
 def load_yaml(path: Path) -> dict:
@@ -151,38 +153,61 @@ def build_catalog(root: Path) -> dict:
     }
 
 
+def load_signing_key(signing_key: str) -> Ed25519PrivateKey:
+    """Decode the maintainer key from the shapes a secret store mangles it into.
+
+    The CI secret has historically arrived in more than one shape: a PEM
+    body, a PEM with literal "\\n" escapes, base64-of-PEM, and
+    base64-of-the-raw-32-byte seed (the shape sign.py stores
+    contributor.key in). All decode to the same Ed25519 key, so each is
+    tried in turn and the first that parses wins. The key material is
+    never printed; a failure message names the shapes, not the bytes.
+    """
+    text = signing_key.strip()
+    candidates: list[bytes] = [
+        text.encode("utf-8"),
+        text.replace("\\n", "\n").encode("utf-8"),
+    ]
+    try:
+        candidates.append(base64.b64decode(text, validate=True))
+    except ValueError:
+        pass
+
+    for candidate in candidates:
+        if b"PRIVATE KEY-----" not in candidate:
+            if len(candidate) == 32:
+                return Ed25519PrivateKey.from_private_bytes(candidate)
+            continue
+        try:
+            loaded = serialization.load_pem_private_key(candidate, password=None)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(loaded, Ed25519PrivateKey):
+            raise TypeError(
+                f"the signing key is {type(loaded).__name__}, not Ed25519; "
+                "the catalog is signed with Ed25519"
+            )
+        return loaded
+
+    raise ValueError(
+        "MODDIN_SIGNING_KEY is neither a PEM private key, a PEM with "
+        "escaped newlines, base64-of-PEM, nor base64-of-raw-32-byte-seed"
+    )
+
+
 def maybe_sign(catalog_path: Path) -> None:
     signing_key = os.environ.get("MODDIN_SIGNING_KEY")
     if not signing_key:
         print("MODDIN_SIGNING_KEY not set; skipping signature", file=sys.stderr)
         return
 
-    pem_path = Path("secrets") / "maintainer.pem"
-    pem_path.parent.mkdir(exist_ok=True)
-    pem_path.write_text(signing_key, encoding="utf-8")
-    pem_path.chmod(0o600)
-
-    try:
-        # `openssl pkeyutl -sign` rejects PKCS#8 Ed25519 keys on
-        # modern OpenSSL builds; `openssl dgst -sign` accepts both
-        # PKCS#1 and PKCS#8 PEMs and produces a signature the app
-        # verifies byte-for-byte the same way (`ed25519-dalek.verify`).
-        # Signature is raw Ed25519 (no DER wrapping), matching the
-        # base64 64-byte payload the app expects.
-        subprocess.run(
-            [
-                "openssl",
-                "dgst",
-                "-sign",
-                str(pem_path),
-                "-out",
-                "catalog.json.sig",
-                str(catalog_path),
-            ],
-            check=True,
-        )
-    finally:
-        pem_path.unlink()
+    key = load_signing_key(signing_key)
+    # Raw Ed25519 (no DER wrapping) — the 64-byte payload the app verifies
+    # byte-for-byte with ed25519-dalek. The previous openssl dgst -sign
+    # step produced the same bytes; cryptography is used here because it
+    # accepts every PEM shape above without a temp file on disk.
+    signature = key.sign(catalog_path.read_bytes())
+    catalog_path.with_name("catalog.json.sig").write_bytes(signature)
 
 
 def main(argv: list[str]) -> int:
