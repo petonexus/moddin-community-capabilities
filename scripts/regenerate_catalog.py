@@ -281,8 +281,23 @@ def load_signing_key(signing_key: str) -> tuple[Ed25519PrivateKey, str]:
                 "is only as strong as the secret it lives in"
             ) from error
         except ValueError:
-            if candidate.startswith(b"0"):
-                notes.append(f"{label}: DER-reject")
+            notes.append(f"{label}: DER-reject({candidate[:2].hex()})")
+            # cryptography cannot read every PKCS#8 shape: RFC 8410
+            # OneAsymmetricKey v2 (version 1, [1] publicKey) is rejected
+            # outright, and the Rust pkcs8 crate — which generated this
+            # repo's maintainer keys — writes exactly that shape. The
+            # Ed25519 seed is the 32 bytes after the OID 2b6570's
+            # inner OCTET STRING header (04 22 04 20), so a v2 blob is
+            # still usable by extracting the seed directly.
+            marker = candidate.find(bytes.fromhex("2b6570"))
+            if marker != -1:
+                inner = candidate.find(b"\x04\x22\x04\x20", marker)
+                if inner != -1:
+                    seed = candidate[inner + 4 : inner + 36]
+                    if len(seed) == 32:
+                        return Ed25519PrivateKey.from_private_bytes(seed), (
+                            f"{label} (PKCS#8 v2 seed)"
+                        )
             continue
         if not isinstance(loaded, Ed25519PrivateKey):
             raise TypeError(
