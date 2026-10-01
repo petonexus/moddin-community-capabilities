@@ -53,6 +53,15 @@ jobs:
           set -euo pipefail
           python scripts/validate_capability.py capabilities/
 
+      # The signing code runs in build-catalog.yml against a secret nobody
+      # can read back. These prove, with keys generated for the run, that
+      # every shape the secret can arrive in loads and that the signature
+      # is the base64 file the app reads.
+      - name: Test the catalog signing code
+        run: |
+          set -euo pipefail
+          python scripts/test_regenerate_catalog.py
+
       # The validator owns these shapes. The inline json.load checks
       # that used to live here duplicated it, and the duplication is
       # how a shape drifts: the app-side reader and CI were two

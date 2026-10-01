@@ -18,6 +18,12 @@ jobs:
   catalog:
     name: Regenerate and sign catalog.json
     runs-on: ubuntu-latest
+    # The repository's default workflow token is read-only. The commit
+    # step pushes the regenerated catalog and the release step creates a
+    # release; both need contents: write, and without it they fail with a
+    # 403 only after signing has already succeeded.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
