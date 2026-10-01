@@ -181,7 +181,7 @@ def load_signing_key(signing_key: str) -> tuple[Ed25519PrivateKey, str]:
     except UnicodeDecodeError:
         notes.append("utf16 no")
 
-    def try_decode(label: str, decode) -> None:
+    def try_decode(label: str, decode, nested: bool = True) -> None:
         try:
             decoded = decode(text)
         except (ValueError, TypeError, binascii.Error):
@@ -197,9 +197,31 @@ def load_signing_key(signing_key: str) -> tuple[Ed25519PrivateKey, str]:
         candidates.append(
             (f"{label} as escaped text", inner.replace("\\n", "\n").encode("utf-8"))
         )
+        if not nested:
+            return
+        for inner_label, inner_decode in (
+            ("base64", lambda s: base64.b64decode(s, validate=True)),
+            (
+                "base64url",
+                lambda s: base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)),
+            ),
+        ):
+            try:
+                candidates.append(
+                    (f"{label} as {inner_label}", inner_decode(inner.strip()))
+                )
+                notes.append(f"{label}/{inner_label}->{len(candidates[-1][1])}B")
+            except (ValueError, TypeError, binascii.Error):
+                pass
 
     try_decode(
         "base64", lambda s: base64.b64decode(s, validate=True)
+    )
+    # `openssl base64` and many hand-copied secrets wrap at 64 columns;
+    # the strict decoder above rejects the embedded newlines.
+    try_decode(
+        "base64-wrapped",
+        lambda s: base64.b64decode("".join(s.split()), validate=True),
     )
     try_decode("base64url", lambda s: base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)))
     try_decode("hex", lambda s: bytes.fromhex(s))
@@ -245,6 +267,29 @@ def load_signing_key(signing_key: str) -> tuple[Ed25519PrivateKey, str]:
             return loaded, label
         if len(candidate) == 32:
             return Ed25519PrivateKey.from_private_bytes(candidate), label
+        # A decoded binary blob that is not a seed is often DER — PKCS#8
+        # with the public key embedded is ~119 bytes, which is the shape
+        # the CI secret arrived in. DER is attempted for every binary
+        # candidate; a rejection is recorded so a failure can tell
+        # "not DER" apart from "DER the loader cannot read".
+        try:
+            loaded = serialization.load_der_private_key(candidate, password=None)
+        except TypeError as error:
+            raise ValueError(
+                f"the signing key (via {label}) is passphrase-encrypted: "
+                f"{error}; store it unencrypted — the catalog signature "
+                "is only as strong as the secret it lives in"
+            ) from error
+        except ValueError:
+            if candidate.startswith(b"0"):
+                notes.append(f"{label}: DER-reject")
+            continue
+        if not isinstance(loaded, Ed25519PrivateKey):
+            raise TypeError(
+                f"the signing key is {type(loaded).__name__}, not Ed25519; "
+                "the catalog is signed with Ed25519"
+            )
+        return loaded, f"{label} (DER)"
 
     raise ValueError(f"unrecognised secret shape ({'; '.join(notes)})")
 
