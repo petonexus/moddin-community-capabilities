@@ -29,6 +29,7 @@ signed bytes means one signature covers both, and they cannot disagree.
 from __future__ import annotations
 
 import base64
+import binascii
 import datetime as _dt
 import hashlib
 import json
@@ -153,46 +154,99 @@ def build_catalog(root: Path) -> dict:
     }
 
 
-def load_signing_key(signing_key: str) -> Ed25519PrivateKey:
-    """Decode the maintainer key from the shapes a secret store mangles it into.
+def load_signing_key(signing_key: str) -> tuple[Ed25519PrivateKey, str]:
+    """Decode the maintainer key from the shape a secret store mangled it into.
 
-    The CI secret has historically arrived in more than one shape: a PEM
-    body, a PEM with literal "\\n" escapes, base64-of-PEM, and
-    base64-of-the-raw-32-byte seed (the shape sign.py stores
-    contributor.key in). All decode to the same Ed25519 key, so each is
-    tried in turn and the first that parses wins. The key material is
-    never printed; a failure message names the shapes, not the bytes.
+    The CI secret cannot be read back, so this loader is the only place
+    that can meet whatever shape it holds. Candidates, in order: plain
+    text, escaped-newline text, UTF-16 text (PowerShell 5.1 writes
+    Unicode), then base64 / base64url / hex decodings of the whole
+    secret, and finally the common JSON envelopes (a JWK field ``d``,
+    or a ``privateKey``/``priv``/``seed`` string). A decoded 32-byte
+    value is an Ed25519 seed; a decoded PEM body loads directly. On
+    success the caller learns which shape matched; on failure the error
+    names decodability only — never key bytes.
     """
-    text = signing_key.strip()
-    candidates: list[bytes] = [
-        text.encode("utf-8"),
-        text.replace("\\n", "\n").encode("utf-8"),
+    text = signing_key.strip().strip('"').strip("'")
+    candidates: list[tuple[str, bytes]] = [
+        ("plain text", text.encode("utf-8")),
+        ("escaped-newline text", text.replace("\\n", "\n").encode("utf-8")),
     ]
+    notes: list[str] = [f"secret is {len(text)} chars"]
+
     try:
-        candidates.append(base64.b64decode(text, validate=True))
-    except ValueError:
-        pass
+        utf16 = text.encode("utf-8").decode("utf-16-le")
+        candidates.append(("UTF-16 text", utf16.encode("utf-8")))
+        notes.append("utf16-decodes")
+    except UnicodeDecodeError:
+        notes.append("utf16 no")
 
-    for candidate in candidates:
-        if b"PRIVATE KEY-----" not in candidate:
-            if len(candidate) == 32:
-                return Ed25519PrivateKey.from_private_bytes(candidate)
-            continue
+    def try_decode(label: str, decode) -> None:
         try:
-            loaded = serialization.load_pem_private_key(candidate, password=None)
-        except (ValueError, TypeError):
-            continue
-        if not isinstance(loaded, Ed25519PrivateKey):
-            raise TypeError(
-                f"the signing key is {type(loaded).__name__}, not Ed25519; "
-                "the catalog is signed with Ed25519"
-            )
-        return loaded
+            decoded = decode(text)
+        except (ValueError, TypeError, binascii.Error):
+            notes.append(f"{label} no")
+            return
+        notes.append(f"{label}->{len(decoded)}B")
+        candidates.append((label, decoded))
+        try:
+            inner = decoded.decode("utf-8")
+        except UnicodeDecodeError:
+            return
+        candidates.append((f"{label} as text", inner.encode("utf-8")))
+        candidates.append(
+            (f"{label} as escaped text", inner.replace("\\n", "\n").encode("utf-8"))
+        )
 
-    raise ValueError(
-        "MODDIN_SIGNING_KEY is neither a PEM private key, a PEM with "
-        "escaped newlines, base64-of-PEM, nor base64-of-raw-32-byte-seed"
+    try_decode(
+        "base64", lambda s: base64.b64decode(s, validate=True)
     )
+    try_decode("base64url", lambda s: base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)))
+    try_decode("hex", lambda s: bytes.fromhex(s))
+
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        doc = None
+    if isinstance(doc, dict):
+        for field in ("d", "privateKey", "priv", "seed"):
+            value = doc.get(field)
+            if not isinstance(value, str):
+                continue
+            for label, decode in (
+                ("base64url", lambda s: base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))),
+                ("base64", lambda s: base64.b64decode(s, validate=True)),
+                ("hex", lambda s: bytes.fromhex(s)),
+            ):
+                try:
+                    candidates.append((f"JSON {field} as {label}", decode(value.strip())))
+                    notes.append(f"json.{field}/{label} ok")
+                    break
+                except (ValueError, TypeError, binascii.Error):
+                    continue
+
+    for label, candidate in candidates:
+        if b"PRIVATE KEY-----" in candidate:
+            try:
+                loaded = serialization.load_pem_private_key(candidate, password=None)
+            except TypeError as error:
+                raise ValueError(
+                    f"the signing key (via {label}) is passphrase-encrypted: "
+                    f"{error}; store it unencrypted — the catalog signature "
+                    "is only as strong as the secret it lives in"
+                ) from error
+            except ValueError:
+                continue
+            if not isinstance(loaded, Ed25519PrivateKey):
+                raise TypeError(
+                    f"the signing key is {type(loaded).__name__}, not Ed25519; "
+                    "the catalog is signed with Ed25519"
+                )
+            return loaded, label
+        if len(candidate) == 32:
+            return Ed25519PrivateKey.from_private_bytes(candidate), label
+
+    raise ValueError(f"unrecognised secret shape ({'; '.join(notes)})")
 
 
 def maybe_sign(catalog_path: Path) -> None:
@@ -201,11 +255,19 @@ def maybe_sign(catalog_path: Path) -> None:
         print("MODDIN_SIGNING_KEY not set; skipping signature", file=sys.stderr)
         return
 
-    key = load_signing_key(signing_key)
+    key, shape = load_signing_key(signing_key)
+    # The fingerprint is public data (public-keys.json, MAINTAINERS.md)
+    # and is the only way to tell from a CI log whether the secret holds
+    # the key the app pins, whatever shape it arrived in.
+    public = key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    fingerprint = hashlib.sha256(base64.b64encode(public)).hexdigest()[:16]
+    print(f"signing with key {fingerprint} (secret shape: {shape})")
     # Raw Ed25519 (no DER wrapping) — the 64-byte payload the app verifies
     # byte-for-byte with ed25519-dalek. The previous openssl dgst -sign
     # step produced the same bytes; cryptography is used here because it
-    # accepts every PEM shape above without a temp file on disk.
+    # accepts every shape above without a temp file on disk.
     signature = key.sign(catalog_path.read_bytes())
     catalog_path.with_name("catalog.json.sig").write_bytes(signature)
 
