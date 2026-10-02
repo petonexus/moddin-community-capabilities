@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-09-29T22:28:01Z",
+  "generatedAt": "2026-10-02T04:11:09Z",
   "generator": "scripts/regenerate_catalog.py",
   "capabilities": [
     {
@@ -44,7 +44,63 @@
         "Combined with OptiScaler the unlocked FPS may make frame-generation reordering visible; lower the cap if you see stutter.",
         "There is no `uninstall` chain on purpose. The install is recorded in Moddin's transaction store, which records every file each step wrote; removing the capability rolls that back. A hand-written delete would be both redundant and, as a `file-delete` against a directory, impossible."
       ],
-      "signed": false
+      "signed": false,
+      "yamlSha256": "896ea9b33453bcb4a8ca686d516e95ce7e014282aca6818da04dbfae214d2cc2"
+    },
+    {
+      "id": "community-specialk-tweak-profile",
+      "version": "1.0.0",
+      "displayName": "Community Special K Tweak Profile",
+      "category": "graphics",
+      "status": "planned",
+      "homepage": "https://github.com/petonexus/moddin-community-capabilities/tree/main/capabilities/community-specialk-tweak-profile",
+      "downloadUrl": "https://raw.githubusercontent.com/petonexus/moddin-community-capabilities/main/capabilities/community-specialk-tweak-profile/capability.yaml",
+      "configSchema": [
+        {
+          "name": "processName",
+          "type": "string",
+          "required": true,
+          "description": "File name of the game process without the .exe, e.g. Game.exe -> Game. Used both to close the game before the write and by the running-process check."
+        },
+        {
+          "name": "specialkLibrary",
+          "type": "string",
+          "required": true,
+          "description": "File name of the Special K loader sitting in the game folder, e.g. SpecialK64.dll. Declared as a string rather than a path because the file-exists check resolves it through safe_join_relative, which rejects an absolute path; give the bare file name."
+        },
+        {
+          "name": "tweakFile",
+          "type": "string",
+          "required": true,
+          "description": "Path of the tweak file to write, relative to the game folder, e.g. SpecialK/moddin-tweaks.ini. Deliberately relative, not type: path - a path written inside the game folder is inside the rollback scope, so Undo restores whatever the file held before this install."
+        },
+        {
+          "name": "enableOverlay",
+          "type": "enum",
+          "enumValues": [
+            "True",
+            "False"
+          ],
+          "required": true,
+          "description": "Value written to EnableOverlay in the generated tweak file."
+        },
+        {
+          "name": "frameRateLimit",
+          "type": "number",
+          "required": true,
+          "description": "Frame cap written to FrameRateLimit. Whole number only: the runner renders a template number through as_u64, so a fractional value is written to the file as the literal text {frameRateLimit}."
+        }
+      ],
+      "safetyNotes": [
+        "Not installable yet. The steps are verified against the runner, but the Special K side is not: this repository cannot confirm which file name Special K reads from a game folder, which INI section and keys it honours, or which loader DLL a given game ships. A maintainer has to apply it to one real game and watch the loader pick the file up before this becomes available.",
+        "This recipe does not install Special K. The specialk-installed check blocks the install if the loader is not already in the game folder.",
+        "Moddin does not disable anti-cheat. Injecting Special K into an anti-cheat game is the user's decision and their risk.",
+        "tweakFile must stay inside the game folder. Written outside it, the install still runs but the write is outside the rollback scope and Undo will not put the previous file back.",
+        "Special K reads its tweak files when the game starts, so Moddin closes the game before writing and the change takes effect on the next launch."
+      ],
+      "signed": false,
+      "yamlSha256": "43fb51de22d6d2c4c61a25c01e44a50b995de8e9ebe23f388d46942a5098872c"
     }
-  ]
+  ],
+  "revoked": []
 }
