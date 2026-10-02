@@ -133,6 +133,7 @@ def build_catalog(root: Path) -> dict:
             "configSchema": spec.get("configSchema", []),
             "safetyNotes": spec.get("safetyNotes", []),
             "signed": signed,
+            "yamlSha256": hashlib.sha256(spec_path.read_bytes()).hexdigest(),
         }
         if signed:
             public_key = (folder / "SIGNED-BY").read_text(encoding="utf-8")

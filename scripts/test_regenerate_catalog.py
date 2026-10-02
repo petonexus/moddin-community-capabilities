@@ -237,5 +237,18 @@ class MaybeSign(unittest.TestCase):
         self.assertFalse(self.sig.exists())
 
 
+class YamlDigest(unittest.TestCase):
+    def test_digest_covers_original_bytes_including_crlf(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "capabilities" / "test"
+            folder.mkdir(parents=True)
+            payload = b"id: test\r\nversion: 1.0.0\r\n"
+            (folder / "capability.yaml").write_bytes(payload)
+            (root / "revoked-ids.json").write_text('{"revoked": []}', encoding="utf-8")
+            entry = regenerate_catalog.build_catalog(root)["capabilities"][0]
+            self.assertEqual(entry["yamlSha256"], hashlib.sha256(payload).hexdigest())
+            self.assertNotEqual(entry["yamlSha256"], hashlib.sha256(payload.replace(b"\r\n", b"\n")).hexdigest())
+
 if __name__ == "__main__":
     unittest.main()
