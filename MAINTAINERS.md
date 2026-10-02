@@ -7,13 +7,17 @@ require at least one approval before they can merge.
 
 | GitHub handle | Role | Public key fingerprint | Added |
 |---|---|---|---|
-| @moddin-bot | Lead maintainer, signing-key holder | `d489a3a0be894b19` | 2026-09-24 |
+| @moddin-bot | Lead maintainer, signing-key holder | `bbe4bcb7ebd11a6f` | 2026-10-02 |
 | _(add your handle here)_ | Co-maintainer | _(pending)_ | — |
 
-The `d489a3a0be894b19` fingerprint is `SHA-256(R2oSrMGh0d6pHIWFHZwvU+sA+wK1Uo/vaBq/L1WJ6GU=)[:8]`,
-matching the value embedded in Moddin Desktop's `BOOTSTRAP_PUBLIC_KEY_B64`
-constant. Apps verify this matches the public key in `public-keys.json`
-before trusting any signed catalog.
+The `bbe4bcb7ebd11a6f` fingerprint is the first 16 hex characters of
+SHA-256 over the raw 32 public-key bytes (base64:
+`JURnO8HhZDsJdoTFEeF4mq1pDgFnfXN0/OZgPuzJKfc=`). It matches the
+Moddin Desktop beta.6 bootstrap anchor and the active `public-keys.json` entry.
+The previous active key was retired after its private copy could not be recovered;
+the repository secret still held the older e247ca4981f22245 key. The maintainer
+authorized a replacement on 2026-10-02. The new private key is kept outside Git
+and supplied only through the `MODDIN_CATALOG_SIGNING_KEY` Actions secret.
 
 ### Past signing keys
 

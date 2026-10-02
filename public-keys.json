@@ -5,10 +5,20 @@
       "handle": "@moddin-bot",
       "role": "lead-maintainer",
       "active": true,
+      "addedAt": "2026-10-02T04:09:18Z",
+      "publicKey": "JURnO8HhZDsJdoTFEeF4mq1pDgFnfXN0/OZgPuzJKfc=",
+      "fingerprint": "bbe4bcb7ebd11a6f",
+      "addedBy": "moddin-desktop/key-rotation-2026-10-02"
+    },
+    {
+      "handle": "@moddin-bot",
+      "role": "lead-maintainer",
+      "active": false,
       "addedAt": "2026-09-24T04:46:17Z",
       "publicKey": "R2oSrMGh0d6pHIWFHZwvU+sA+wK1Uo/vaBq/L1WJ6GU=",
       "fingerprint": "d489a3a0be894b19",
-      "addedBy": "moddin-desktop/key-rotation-2026-09-24"
+      "addedBy": "moddin-desktop/key-rotation-2026-09-24",
+      "retiredAt": "2026-10-02T04:09:18Z"
     },
     {
       "handle": "@marcoasjunior",
